@@ -114,10 +114,10 @@ function startActionMusic() {
     }, 170);
 }
 
-// --- IMAGENS COM CAMINHO PARA A NOVA PASTA /IMG ---
+// --- IMAGENS COM CAMINHO PARA A PASTA /IMG ---
 function loadLocalImage(src) {
     const img = new Image(); 
-    img.src = 'img/' + src; // Aponta diretamente para a subpasta img/
+    img.src = 'img/' + src; 
     img.onload = () => img.isLoaded = true;
     img.onerror = () => img.isLoaded = false;
     return img;
@@ -155,7 +155,7 @@ function createExplosion(x, y, color) {
     }
 }
 
-// --- CONTROLES ---
+// --- CONTROLES TECLADO ---
 window.addEventListener('keydown', (e) => {
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if (e.code === 'Space' || e.code === 'ArrowUp') {
@@ -177,21 +177,24 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
+// --- NOVO GERENCIADOR DE CLIQUE BLINDADO CONTRA TRAVAMENTOS ---
 canvas.addEventListener('click', (e) => {
-    if (audioCtx.state === 'suspended') {
-        audioCtx.resume().then(() => {
-            console.log("Áudio desbloqueado!");
-        });
+    // Ativa e acorda o motor de áudio no clique
+    if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
     }
 
     if (gameState === "startScreen") {
         const rect = canvas.getBoundingClientRect();
+        // Área estendida para cliques em telas de celulares touch
         if ((e.clientX - rect.left) >= (canvas.width / 2) - 150 && (e.clientX - rect.left) <= (canvas.width / 2) + 150 &&
             (e.clientY - rect.top) >= 400 && (e.clientY - rect.top) <= 550) {
             gameState = "playing"; 
+            resetGame();
         }
     } else if (gameState === "gameOver") {
-        gameState = "playing"; resetGame();
+        gameState = "playing"; 
+        resetGame();
     } else {
         if (!capivara.isCrouching && !capivara.isJumping) jump();
     }
@@ -244,13 +247,9 @@ function spawnItem() {
     });
 }
 
-function spawnBonusLife() {
-    obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 40 - (Math.random() * 40), width: CONFIG.vidaBonus.largura, height: CONFIG.vidaBonus.altura, img: imgVidaBonus, fallback: '❤️', type: 'vidaBonus' });
-}
-
-function spawnSuperPowerItem() {
-    obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 30, width: CONFIG.superPoder.largura, height: CONFIG.superPoder.altura, img: imgPoder, fallback: '⚡', type: 'itemPoder' });
-}
+// [Mantido sem alterações para garantir a consistência de bônus]
+function spawnBonusLife() { obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 40 - (Math.random() * 40), width: CONFIG.vidaBonus.largura, height: CONFIG.vidaBonus.altura, img: imgVidaBonus, fallback: '❤️', type: 'vidaBonus' }); }
+function spawnSuperPowerItem() { obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 30, width: CONFIG.superPoder.largura, height: CONFIG.superPoder.altura, img: imgPoder, fallback: '⚡', type: 'itemPoder' }); }
 
 function drawStartScreen() {
     if (imgCapa.isLoaded) ctx.drawImage(imgCapa, 0, 0, canvas.width, canvas.height);
