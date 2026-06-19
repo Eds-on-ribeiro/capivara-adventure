@@ -178,12 +178,17 @@ window.addEventListener('keyup', (e) => {
 });
 
 canvas.addEventListener('click', (e) => {
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx.state === 'suspended') {
+        audioCtx.resume().then(() => {
+            console.log("Áudio desbloqueado!");
+        });
+    }
+
     if (gameState === "startScreen") {
         const rect = canvas.getBoundingClientRect();
-        if ((e.clientX - rect.left) >= (canvas.width / 2) - 130 && (e.clientX - rect.left) <= (canvas.width / 2) + 130 &&
-            (e.clientY - rect.top) >= 440 && (e.clientY - rect.top) <= 510) {
-            gameState = "playing"; resetGame();
+        if ((e.clientX - rect.left) >= (canvas.width / 2) - 150 && (e.clientX - rect.left) <= (canvas.width / 2) + 150 &&
+            (e.clientY - rect.top) >= 400 && (e.clientY - rect.top) <= 550) {
+            gameState = "playing"; 
         }
     } else if (gameState === "gameOver") {
         gameState = "playing"; resetGame();
