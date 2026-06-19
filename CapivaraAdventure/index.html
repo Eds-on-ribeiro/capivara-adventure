@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capivara Adventure - Production Edition</title>
+    <style>
+        body { margin: 0; padding: 0; background: #0f0800; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; user-select: none; }
+        canvas { background: #ffcc99; box-shadow: 0 10px 40px rgba(0,0,0,0.9); max-width: 95vw; max-height: 95vh; }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="1024" height="576"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let gameState = "startScreen"; 
+let score = 0;
+let highScore = parseInt(localStorage.getItem('capivaraHighScore')) || 0; 
+let gameSpeed = 7;
+const groundY = 505; 
+
+let lives = 3; 
+const MAX_LIVES = 10; 
+
+let isInvincible = false;
+let invincibilityTimer = 0;
+let blinkVisible = true;
+
+let hasSuperPower = false;
+let superPowerTimer = 0;
+let powerGlowAngle = 0;
+
+let waterOffset = 0;
+let obstacles = [];
+let spawnTimer = 0;
+let itemTimer = 0;
+let bonusLifeTimer = 0; 
+let powerSpawnTimer = 0;
+
+let rainDrops = [];
+let particles = [];
+
+const CONFIG = {
+    capivara: { largura: 130, alturaNormal: 100, alturaAgachado: 50 }, 
+    jacare:   { largura: 150, altura: 80 },  
+    tronco:   { largura: 90,  altura: 80 },
+    aguia:    { largura: 110, altura: 75 },
+    item:     { largura: 55,  altura: 55 },
+    vidaBonus: { largura: 50, altura: 50 },
+    superPoder: { largura: 50, altura: 50 },
+    hudVida:  { largura: 28,  altura: 28 } 
+};
+
+// --- ÁUDIO NATIVO ---
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+let musicInterval;
+
+function playTone(freq, type, duration, vol = 0.1) {
+    try {
+        let osc = audioCtx.createOscillator();
+        let gainNode = audioCtx.createGain();
+        osc.type = type; osc.frequency.value = freq;
+        gainNode.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc.connect(gainNode); gainNode.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    } catch(e){}
+}
+
+function playRockNote(baseFreq, duration, vol = 0.04) {
+    try {
+        let osc1 = audioCtx.createOscillator();
+        let osc2 = audioCtx.createOscillator();
+        let gainNode = audioCtx.createGain();
+        osc1.type = 'sawtooth'; osc1.frequency.value = baseFreq;
+        osc2.type = 'square'; osc2.frequency.value = baseFreq * 1.5;
+        gainNode.gain.setValueAtTime(vol, audioCtx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(vol * 0.8, audioCtx.currentTime + duration * 0.3);
+        gainNode.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+        osc1.connect(gainNode); osc2.connect(gainNode); gainNode.connect(audioCtx.destination);
+        osc1.start(); osc2.start();
+        osc1.stop(audioCtx.currentTime + duration); osc2.stop(audioCtx.currentTime + duration);
+    } catch(e){}
+}
+
+const soundJump = () => { playTone(160, 'triangle', 0.15, 0.3); setTimeout(() => playTone(320, 'triangle', 0.15, 0.2), 40); };
+const soundScore = () => { playTone(587.33, 'sine', 0.08, 0.15); setTimeout(() => playTone(698.46, 'sine', 0.12, 0.15), 60); };
+const soundHeal = () => { playTone(523.25, 'sine', 0.05); setTimeout(() => playTone(659.25, 'sine', 0.05), 50); setTimeout(() => playTone(783.99, 'sine', 0.15), 100); };
+const soundDamage = () => { playTone(120, 'sawtooth', 0.25, 0.3); };
+const soundGameOver = () => { playTone(110, 'sawtooth', 0.4, 0.3); setTimeout(() => playTone(82.41, 'sawtooth', 0.5, 0.3), 180); };
+const soundSlash = () => { playTone(700, 'sawtooth', 0.08, 0.2); };
+
+function startActionMusic() {
+    clearInterval(musicInterval);
+    let newRockRiff = [
+        110.00, 0, 110.00, 146.83, 130.81, 0, 130.81, 164.81,
+        146.83, 146.83, 164.81, 130.81, 110.00, 0, 98.00, 110.00
+    ];
+    let step = 0;
+    musicInterval = setInterval(() => {
+        if (gameState !== "playing") return;
+        let notaAplay = newRockRiff[step % newRockRiff.length];
+        if (notaAplay > 0) {
+            let freqFinal = hasSuperPower ? notaAplay * 2 : notaAplay;
+            playRockNote(freqFinal, 0.22, hasSuperPower ? 0.02 : 0.04);
+        }
+        if (step % 4 === 0) playTone(50, 'triangle', 0.12, 0.25);
+        else if (step % 4 === 2) playTone(250, 'sine', 0.06, 0.08);
+        step++;
+    }, 170);
+}
+
+// --- IMAGENS COM CAMINHO PARA A NOVA PASTA /IMG ---
+function loadLocalImage(src) {
+    const img = new Image(); 
+    img.src = 'img/' + src; // Aponta diretamente para a subpasta img/
+    img.onload = () => img.isLoaded = true;
+    img.onerror = () => img.isLoaded = false;
+    return img;
+}
+
+const imgCapivara = loadLocalImage('capivara.png');
+const imgJacare = loadLocalImage('jacare.png');
+const imgTronco = loadLocalImage('tronco.png');
+const imgAguia = loadLocalImage('aguia.png');
+const imgGoiaba = loadLocalImage('goiaba.png');
+const imgMelancia = loadLocalImage('melancia.png');
+const imgFundo = loadLocalImage('fundo.png'); 
+const imgVidaBonus = loadLocalImage('vida_bonus.png');
+const imgVidaHUD = loadLocalImage('vida.png');
+const imgPoder = loadLocalImage('poder.png'); 
+
+let imgCapa = loadLocalImage('capa_jogo.png');
+setTimeout(() => { if (!imgCapa.isLoaded) imgCapa.src = 'img/capa_jogo.jpg'; }, 100);
+
+const capivara = {
+    x: 120, y: groundY - CONFIG.capivara.alturaNormal,
+    width: CONFIG.capivara.largura, height: CONFIG.capivara.alturaNormal,
+    gravity: 0.75, lift: -16, velocity: 0, isJumping: false, isCrouching: false
+};
+
+let isDownKeyPressed = false;
+
+function createExplosion(x, y, color) {
+    for (let i = 0; i < 15; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8 - 2,
+            size: Math.random() * 5 + 3, color: color, alpha: 1, decay: Math.random() * 0.03 + 0.01
+        });
+    }
+}
+
+// --- CONTROLES ---
+window.addEventListener('keydown', (e) => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+        e.preventDefault();
+        if (gameState === "playing" && !capivara.isCrouching && !capivara.isJumping) jump();
+        if (gameState === "gameOver") { gameState = "playing"; resetGame(); }
+    }
+    if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        isDownKeyPressed = true;
+        if (gameState === "playing" && !capivara.isJumping && !capivara.isCrouching) applyCrouch(true);
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'ArrowDown') {
+        isDownKeyPressed = false;
+        if (capivara.isCrouching) applyCrouch(false);
+    }
+});
+
+canvas.addEventListener('click', (e) => {
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    if (gameState === "startScreen") {
+        const rect = canvas.getBoundingClientRect();
+        if ((e.clientX - rect.left) >= (canvas.width / 2) - 130 && (e.clientX - rect.left) <= (canvas.width / 2) + 130 &&
+            (e.clientY - rect.top) >= 440 && (e.clientY - rect.top) <= 510) {
+            gameState = "playing"; resetGame();
+        }
+    } else if (gameState === "gameOver") {
+        gameState = "playing"; resetGame();
+    } else {
+        if (!capivara.isCrouching && !capivara.isJumping) jump();
+    }
+});
+
+function jump() {
+    capivara.velocity = capivara.lift; capivara.isJumping = true;
+    try { soundJump(); } catch(e){}
+}
+
+function applyCrouch(crouch) {
+    if (crouch) {
+        capivara.isCrouching = true; capivara.height = CONFIG.capivara.alturaAgachado;
+        capivara.y = groundY - CONFIG.capivara.alturaAgachado;
+    } else {
+        capivara.isCrouching = false; capivara.height = CONFIG.capivara.alturaNormal;
+        capivara.y = groundY - CONFIG.capivara.alturaNormal;
+    }
+}
+
+function resetGame() {
+    obstacles = []; particles = []; score = 0; gameSpeed = 7; lives = 3; isInvincible = false;
+    hasSuperPower = false; superPowerTimer = 0; isDownKeyPressed = false; applyCrouch(false);
+    capivara.y = groundY - capivara.height; capivara.velocity = 0; capivara.isJumping = false;
+    
+    rainDrops = [];
+    for (let i = 0; i < 60; i++) {
+        rainDrops.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, length: Math.random() * 20 + 15, speed: Math.random() * 8 + 12 });
+    }
+    startActionMusic();
+}
+
+function spawnObstacle() {
+    gameSpeed += 0.05; const rand = Math.random();
+    if (rand < 0.35) {
+        obstacles.push({ x: canvas.width, y: groundY - CONFIG.jacare.altura + 15, width: CONFIG.jacare.largura, height: CONFIG.jacare.altura, img: imgJacare, fallback: '🐊', type: 'jacare', colorCode: '#4b732f' });
+    } else if (rand >= 0.35 && rand < 0.70) {
+        obstacles.push({ x: canvas.width, y: groundY - CONFIG.tronco.altura + 10, width: CONFIG.tronco.largura, height: CONFIG.tronco.altura, img: imgTronco, fallback: '🪵', type: 'tronco', colorCode: '#875131' });
+    } else {
+        obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 45, width: CONFIG.aguia.largura, height: CONFIG.aguia.altura, img: imgAguia, fallback: '🦅', type: 'aguia', colorCode: '#bf8643' });
+    }
+}
+
+function spawnItem() {
+    const escolheFruta = Math.random() > 0.5;
+    obstacles.push({
+        x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 50 - (Math.random() * 60), 
+        width: CONFIG.item.largura, height: CONFIG.item.altura,
+        img: escolheFruta ? imgMelancia : imgGoiaba, fallback: escolheFruta ? '🍉' : '🍏', type: 'fruta'
+    });
+}
+
+function spawnBonusLife() {
+    obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 40 - (Math.random() * 40), width: CONFIG.vidaBonus.largura, height: CONFIG.vidaBonus.altura, img: imgVidaBonus, fallback: '❤️', type: 'vidaBonus' });
+}
+
+function spawnSuperPowerItem() {
+    obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 30, width: CONFIG.superPoder.largura, height: CONFIG.superPoder.altura, img: imgPoder, fallback: '⚡', type: 'itemPoder' });
+}
+
+function drawStartScreen() {
+    if (imgCapa.isLoaded) ctx.drawImage(imgCapa, 0, 0, canvas.width, canvas.height);
+    else {
+        ctx.fillStyle = '#2b1a08'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff9933'; ctx.font = 'bold 60px "Segoe UI"'; ctx.textAlign = 'center'; ctx.fillText('CAPIVARA ADVENTURE', canvas.width / 2, 200);
+    }
+    ctx.fillStyle = 'rgba(255, 153, 51, 0.9)'; ctx.fillRect((canvas.width / 2) - 130, 440, 260, 70);
+    ctx.lineWidth = 4; ctx.strokeStyle = '#FFFFFF'; ctx.strokeRect((canvas.width / 2) - 130, 440, 260, 70);
+    ctx.fillStyle = '#000000'; ctx.font = 'bold 32px "Segoe UI"'; ctx.textAlign = 'center'; ctx.fillText('JOGAR', canvas.width / 2, 487);
+    ctx.textAlign = 'start';
+}
+
+function drawScenicBackground() {
+    if (imgFundo.isLoaded) ctx.drawImage(imgFundo, 0, 0, canvas.width, canvas.height);
+    else { ctx.fillStyle = '#ffcc99'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+
+    if (score >= 800 && score < 1600) {
+        ctx.fillStyle = 'rgba(20, 10, 60, 0.65)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#FFFFE0'; ctx.beginPath(); ctx.arc(900, 80, 40, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(20, 10, 60, 1)'; ctx.beginPath(); ctx.arc(885, 75, 38, 0, Math.PI * 2); ctx.fill();
+    } else if (score >= 1600) {
+        ctx.fillStyle = 'rgba(100, 0, 0, 0.5)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        if(Math.random() > 0.98) { ctx.fillStyle = 'rgba(255, 255, 255, 0.4)'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+    }
+}
+
+function drawStormRain() {
+    if (score < 1600) return; 
+    ctx.strokeStyle = 'rgba(174, 219, 255, 0.4)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    for (let i = 0; i < rainDrops.length; i++) {
+        let p = rainDrops[i]; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x - 4, p.y + p.length); ctx.stroke();
+        p.y += p.speed; p.x -= 2; 
+        if (p.y > canvas.height) { p.y = -20; p.x = Math.random() * canvas.width; }
+    }
+}
+
+function drawAnimatedRiver() {
+    ctx.fillStyle = score < 800 ? '#1c3b93' : (score < 1600 ? '#0d1330' : '#220011');
+    ctx.fillRect(0, groundY - 15, canvas.width, canvas.height - groundY + 15);
+
+    waterOffset += gameSpeed * 0.4; if (waterOffset > 80) waterOffset = 0;
+    ctx.strokeStyle = score < 800 ? '#3a62d7' : (score < 1600 ? '#152254' : '#440022'); 
+    ctx.lineWidth = 6; ctx.setLineDash([35, 25]); 
+    ctx.beginPath(); ctx.moveTo(-80 - waterOffset, 498); ctx.lineTo(canvas.width + 80 - waterOffset, 498); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-40 + (waterOffset * 0.5), 525); ctx.lineTo(canvas.width + 80 + (waterOffset * 0.5), 525); ctx.stroke();
+    ctx.setLineDash([]); 
+}
+
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === "startScreen") { drawStartScreen(); requestAnimationFrame(loop); return; }
+
+    if (gameState === "gameOver") {
+        drawScenicBackground(); drawAnimatedRiver();
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.9)'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff4444'; ctx.font = 'bold 45px "Segoe UI"'; ctx.textAlign = 'center'; 
+        ctx.fillText('FIM DA AVENTURA! 🐊', canvas.width / 2, canvas.height / 2 - 20);
+        ctx.fillStyle = '#FFF'; ctx.font = '24px "Segoe UI"'; ctx.fillText(`Pontuação Final: ${score}`, canvas.width / 2, canvas.height / 2 + 25);
+        ctx.font = '20px "Segoe UI"'; ctx.fillText('Clique ou Pressione ESPAÇO para reiniciar', canvas.width / 2, canvas.height / 2 + 75);
+        ctx.textAlign = 'start'; requestAnimationFrame(loop); return;
+    }
+
+    drawScenicBackground();
+    drawAnimatedRiver();
+
+    if (hasSuperPower) {
+        superPowerTimer--; powerGlowAngle += 0.15;
+        ctx.save();
+        ctx.strokeStyle = `hsl(${(powerGlowAngle * 50) % 360}, 100%, 60%)`;
+        ctx.lineWidth = 5; ctx.shadowColor = '#fff'; ctx.shadowBlur = 15;
+        ctx.beginPath(); ctx.arc(capivara.x + capivara.width/2, capivara.y + capivara.height/2, CONFIG.capivara.largura/1.5, 0, Math.PI * 2); ctx.stroke();
+        ctx.restore();
+        if (superPowerTimer <= 0) { hasSuperPower = false; startActionMusic(); } 
+    }
+
+    if (isInvincible && !hasSuperPower) {
+        invincibilityTimer--;
+        if (invincibilityTimer % 8 === 0) blinkVisible = !blinkVisible;
+        if (invincibilityTimer <= 0) isInvincible = false;
+    } else {
+        blinkVisible = true;
+    }
+
+    capivara.velocity += capivara.gravity; capivara.y += capivara.velocity;
+    let atualAltura = capivara.isCrouching ? CONFIG.capivara.alturaAgachado : CONFIG.capivara.alturaNormal;
+    if (capivara.y >= groundY - atualAltura) { 
+        capivara.y = groundY - atualAltura; capivara.velocity = 0; capivara.isJumping = false; 
+        if (isDownKeyPressed && !capivara.isCrouching) applyCrouch(true);
+    }
+    
+    if (blinkVisible) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 12; ctx.shadowOffsetX = -5;
+        if (imgCapivara.isLoaded) ctx.drawImage(imgCapivara, capivara.x, capivara.y, capivara.width, capivara.height);
+        else { ctx.fillStyle = '#8B5A2B'; ctx.fillRect(capivara.x, capivara.y, capivara.width, capivara.height); }
+        ctx.restore(); 
+    }
+
+    drawStormRain();
+
+    spawnTimer++; if (spawnTimer > Math.max(45, 95 - (score / 10))) { spawnObstacle(); spawnTimer = 0; }
+    itemTimer++; if (itemTimer > 140) { spawnItem(); itemTimer = 0; }
+    bonusLifeTimer++; if (bonusLifeTimer > 450) { if (lives < MAX_LIVES && Math.random() > 0.4) spawnBonusLife(); bonusLifeTimer = 0; }
+    powerSpawnTimer++; if (powerSpawnTimer > 750) { if (!hasSuperPower) spawnSuperPowerItem(); powerSpawnTimer = 0; }
+
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        let obs = obstacles[i];
+        obs.x -= gameSpeed; 
+        
+        ctx.save();
+        if (obs.type === 'fruta' || obs.type === 'vidaBonus' || obs.type === 'itemPoder') {
+            ctx.shadowColor = 'rgba(255, 255, 255, 0.85)'; ctx.shadowBlur = 15;
+        } else {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 10;
+        }
+
+        if (obs.type === 'itemPoder') {
+            if (imgPoder.isLoaded) ctx.drawImage(imgPoder, obs.x, obs.y, obs.width, obs.height);
+            else { ctx.font = "40px Arial"; ctx.fillText(obs.fallback, obs.x, obs.y + 35); }
+            ctx.restore(); 
+            
+            if (capivara.x < obs.x + obs.width && capivara.x + capivara.width > obs.x && capivara.y < obs.y + obs.height && capivara.y + capivara.height > obs.y) {
+                hasSuperPower = true; superPowerTimer = 180; 
+                try { soundHeal(); startActionMusic(); } catch(e){}
+                obstacles.splice(i, 1); continue;
+            }
+        }
+        else if (obs.type === 'vidaBonus') {
+            if (imgVidaBonus.isLoaded) ctx.drawImage(imgVidaBonus, obs.x, obs.y, obs.width, obs.height);
+            else { ctx.font = "40px Arial"; ctx.fillText(obs.fallback, obs.x, obs.y + 35); }
+            ctx.restore();
+            
+            if (capivara.x < obs.x + obs.width && capivara.x + capivara.width > obs.x && capivara.y < obs.y + obs.height && capivara.y + capivara.height > obs.y) {
+                if (lives < MAX_LIVES) lives++; try { soundHeal(); } catch(e){}
+                obstacles.splice(i, 1); continue;
+            }
+        } 
+        else if (obs.type === 'fruta') {
+            if (obs.img && obs.img.isLoaded) ctx.drawImage(obs.img, obs.x, obs.y, obs.width, obs.height);
+            else { ctx.font = "45px Arial"; ctx.fillText(obs.fallback, obs.x, obs.y + 35); }
+            ctx.restore();
+            
+            if (capivara.x < obs.x + obs.width && capivara.x + capivara.width > obs.x && capivara.y < obs.y + obs.height && capivara.y + capivara.height > obs.y) {
+                score += 50; try { soundScore(); } catch(e){}
+                obstacles.splice(i, 1); continue;
+            }
+        } 
+        else {
+            if (obs.img && obs.img.isLoaded) ctx.drawImage(obs.img, obs.x, obs.y, obs.width, obs.height);
+            else { ctx.fillStyle = obs.colorCode; ctx.fillRect(obs.x, obs.y, obs.width, obs.height); }
+            ctx.restore();
+
+            let padX = obs.type === 'aguia' ? 15 : 25;
+            let padY = obs.type === 'aguia' ? -40 : 15; 
+
+            if (capivara.x + 25 < obs.x + obs.width - padX && 
+                capivara.x + capivara.width - 25 > obs.x + padX && 
+                capivara.y + 10 < obs.y + obs.height && 
+                capivara.y + capivara.height > obs.y + padY) { 
+                
+                if (hasSuperPower) {
+                    score += 20; try { soundSlash(); } catch(e){}
+                    createExplosion(obs.x + obs.width/2, obs.y + obs.height/2, obs.colorCode || '#ff5500');
+                    obstacles.splice(i, 1); continue;
+                } else if (!isInvincible) {
+                    lives--; try { soundDamage(); } catch(e){}
+                    if (lives <= 0) {
+                        gameState = "gameOver"; try { soundGameOver(); } catch(e){}
+                        clearInterval(musicInterval);
+                    } else { isInvincible = true; invincibilityTimer = 90; }
+                }
+            }
+        }
+        
+        if (obs.type !== 'fruta' && obs.type !== 'vidaBonus' && obs.type !== 'itemPoder' && obs.x + obs.width < capivara.x && !obs.passed) { score += 10; obs.passed = true; }
+        if (obs.x + obs.width < 0) obstacles.splice(i, 1);
+    }
+
+    for (let p = particles.length - 1; p >= 0; p--) {
+        let pt = particles[p]; ctx.save(); ctx.globalAlpha = pt.alpha; ctx.fillStyle = pt.color; ctx.fillRect(pt.x, pt.y, pt.size, pt.size); ctx.restore();
+        pt.x += pt.vx; pt.y += pt.vy; pt.alpha -= pt.decay; if (pt.alpha <= 0) particles.splice(p, 1);
+    }
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,1)'; ctx.shadowBlur = 6; 
+    ctx.fillStyle = '#FFF'; ctx.font = 'bold 28px "Segoe UI"'; ctx.fillText(`Pontos: ${score}`, 35, 50);
+    if (score > highScore) { highScore = score; localStorage.setItem('capivaraHighScore', highScore); }
+    ctx.fillStyle = '#eee'; ctx.font = '20px "Segoe UI"'; ctx.fillText(`Recorde: ${highScore}`, 35, 85);
+
+    if (hasSuperPower) {
+        ctx.fillStyle = '#ffcc00'; ctx.font = 'bold 20px "Segoe UI"'; ctx.fillText(`MODO FÚRIA: ${Math.ceil(superPowerTimer / 60)}s`, 35, 120);
+    }
+
+    const startX = canvas.width - 45;
+    for (let l = 0; l < lives; l++) {
+        let posX = startX - (l * 34); 
+        if (imgVidaHUD.isLoaded) ctx.drawImage(imgVidaHUD, posX, 25, CONFIG.hudVida.largura, CONFIG.hudVida.altura);
+        else { ctx.font = "24px Arial"; ctx.fillText('❤️', posX, 50); }
+    }
+
+    ctx.fillStyle = '#fff'; ctx.font = '16px "Segoe UI"';
+    let nomeFase = score < 800 ? "Fase 1: Pantanal" : (score < 1600 ? "Fase 2: Noite dos Jacarés" : "Fase 3: Tempestade Vermelha");
+    ctx.fillText(nomeFase, canvas.width - 220, 85);
+    ctx.restore();
+
+    requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
