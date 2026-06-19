@@ -2,16 +2,27 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Capivara Adventure - Production Edition</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=none">
+    <title>Capivara Adventure - Mobile Edition</title>
     <style>
-        body { margin: 0; padding: 0; background: #0f0800; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; user-select: none; }
-        canvas { background: #ffcc99; box-shadow: 0 10px 40px rgba(0,0,0,0.9); max-width: 95vw; max-height: 95vh; }
+        body { margin: 0; padding: 0; background: #0f0800; display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
+        canvas { background: #ffcc99; box-shadow: 0 10px 40px rgba(0,0,0,0.9); max-width: 100vw; max-height: 70vh; }
+        
+        /* Controles Mobile Fixos na parte inferior da tela */
+        #mobileControls { display: flex; justify-content: space-around; align-items: center; width: 100vw; height: 20vh; max-height: 120px; background: #1a0f02; border-top: 4px solid #ff9933; box-sizing: border-box; padding: 10px 0; }
+        .btn-control { width: 42vw; height: 100%; max-width: 200px; background: #ff9933; border: 3px solid #fff; border-radius: 12px; color: #000; font-size: bold 22px; font-weight: bold; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.5); -webkit-tap-highlight-color: transparent; }
+        .btn-control:active { background: #cc6600; color: #fff; transform: scale(0.95); }
     </style>
 </head>
 <body>
 
 <canvas id="gameCanvas" width="1024" height="576"></canvas>
+
+<!-- Painel de Controles Mobile -->
+<div id="mobileControls">
+    <div id="btnJump" class="btn-control">PULAR 🦘</div>
+    <div id="btnCrouch" class="btn-control">AGACHAR 🕳️</div>
+</div>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
@@ -114,7 +125,6 @@ function startActionMusic() {
     }, 170);
 }
 
-// --- IMAGENS COM CAMINHO PARA A PASTA /IMG ---
 function loadLocalImage(src) {
     const img = new Image(); 
     img.src = 'img/' + src; 
@@ -155,51 +165,57 @@ function createExplosion(x, y, color) {
     }
 }
 
-// --- CONTROLES TECLADO ---
+// --- CONTROLES TECLADO (PC) ---
 window.addEventListener('keydown', (e) => {
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
     if (e.code === 'Space' || e.code === 'ArrowUp') {
         e.preventDefault();
-        if (gameState === "playing" && !capivara.isCrouching && !capivara.isJumping) jump();
-        if (gameState === "gameOver") { gameState = "playing"; resetGame(); }
+        triggerJumpAction();
     }
     if (e.code === 'ArrowDown') {
         e.preventDefault();
-        isDownKeyPressed = true;
-        if (gameState === "playing" && !capivara.isJumping && !capivara.isCrouching) applyCrouch(true);
+        triggerCrouchAction(true);
     }
 });
 
 window.addEventListener('keyup', (e) => {
     if (e.code === 'ArrowDown') {
-        isDownKeyPressed = false;
-        if (capivara.isCrouching) applyCrouch(false);
+        triggerCrouchAction(false);
     }
 });
 
-// --- ZONA DE CLIQUE ADAPTATIVA AMPLIADA PARA DISPOSITIVOS TOUCH ---
-canvas.addEventListener('click', (e) => {
-    if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
-    }
-
-    if (gameState === "startScreen") {
-        const rect = canvas.getBoundingClientRect();
-        const touchY = e.clientY - rect.top;
-
-        // VALIDAÇÃO DIRETA PARA CELULAR: Se tocar na metade inferior do Canvas, dá o start independente da escala!
-        // Isso resolve 100% dos erros de detecção em telas pequenas.
-        if (touchY > (canvas.height * 0.5)) {
-            gameState = "playing"; 
-            resetGame();
-        }
-    } else if (gameState === "gameOver") {
-        gameState = "playing"; 
-        resetGame();
+// --- SISTEMA UNIFICADO DE INTERAÇÃO (MOBILE / MOUSE) ---
+function triggerJumpAction() {
+    if (gameState === "startScreen" || gameState === "gameOver") {
+        gameState = "playing"; resetGame();
     } else {
         if (!capivara.isCrouching && !capivara.isJumping) jump();
     }
-});
+}
+
+function triggerCrouchAction(active) {
+    if (gameState !== "playing") return;
+    isDownKeyPressed = active;
+    if (active && !capivara.isJumping && !capivara.isCrouching) applyCrouch(true);
+    if (!active && capivara.isCrouching) applyCrouch(false);
+}
+
+// Vinculando os botões HTML aos eventos Touch Mobile
+const btnJump = document.getElementById('btnJump');
+const btnCrouch = document.getElementById('btnCrouch');
+
+// Eventos de Pular
+btnJump.addEventListener('touchstart', (e) => { e.preventDefault(); if (audioCtx.state === 'suspended') audioCtx.resume(); triggerJumpAction(); });
+btnJump.addEventListener('mousedown', (e) => { if (audioCtx.state === 'suspended') audioCtx.resume(); triggerJumpAction(); });
+
+// Eventos de Agachar (Segurar pressionado)
+btnCrouch.addEventListener('touchstart', (e) => { e.preventDefault(); triggerCrouchAction(true); });
+btnCrouch.addEventListener('touchend', (e) => { e.preventDefault(); triggerCrouchAction(false); });
+btnCrouch.addEventListener('mousedown', () => { triggerCrouchAction(true); });
+btnCrouch.addEventListener('mouseup', () => { triggerCrouchAction(false); });
+
+// Clique no próprio canvas também funciona como Pulo/Start
+canvas.addEventListener('click', () => { if (audioCtx.state === 'suspended') audioCtx.resume(); triggerJumpAction(); });
 
 function jump() {
     capivara.velocity = capivara.lift; capivara.isJumping = true;
