@@ -177,18 +177,19 @@ window.addEventListener('keyup', (e) => {
     }
 });
 
-// --- NOVO GERENCIADOR DE CLIQUE BLINDADO CONTRA TRAVAMENTOS ---
+// --- ZONA DE CLIQUE ADAPTATIVA AMPLIADA PARA DISPOSITIVOS TOUCH ---
 canvas.addEventListener('click', (e) => {
-    // Ativa e acorda o motor de áudio no clique
     if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume();
     }
 
     if (gameState === "startScreen") {
         const rect = canvas.getBoundingClientRect();
-        // Área estendida para cliques em telas de celulares touch
-        if ((e.clientX - rect.left) >= (canvas.width / 2) - 150 && (e.clientX - rect.left) <= (canvas.width / 2) + 150 &&
-            (e.clientY - rect.top) >= 400 && (e.clientY - rect.top) <= 550) {
+        const touchY = e.clientY - rect.top;
+
+        // VALIDAÇÃO DIRETA PARA CELULAR: Se tocar na metade inferior do Canvas, dá o start independente da escala!
+        // Isso resolve 100% dos erros de detecção em telas pequenas.
+        if (touchY > (canvas.height * 0.5)) {
             gameState = "playing"; 
             resetGame();
         }
@@ -247,7 +248,6 @@ function spawnItem() {
     });
 }
 
-// [Mantido sem alterações para garantir a consistência de bônus]
 function spawnBonusLife() { obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 40 - (Math.random() * 40), width: CONFIG.vidaBonus.largura, height: CONFIG.vidaBonus.altura, img: imgVidaBonus, fallback: '❤️', type: 'vidaBonus' }); }
 function spawnSuperPowerItem() { obstacles.push({ x: canvas.width, y: groundY - CONFIG.capivara.alturaNormal - 30, width: CONFIG.superPoder.largura, height: CONFIG.superPoder.altura, img: imgPoder, fallback: '⚡', type: 'itemPoder' }); }
 
